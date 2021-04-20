@@ -186,6 +186,10 @@ class io_adapter(metaclass=abc.ABCMeta):
             return yolo_v3_io(args, io_model_wrapper, transformer)
         elif task == 'yolo_v3_tf':
             return yolo_v3_tf_io(args, io_model_wrapper, transformer)
+        elif task == 'colorization-v2':
+            return colorization_v2_io(args, io_model_wrapper, transformer)
+        elif task == 'detection-v2':
+            return detection_v2_io(args, io_model_wrapper, transformer)
 
 
 class feedforward_io(io_adapter):
@@ -219,7 +223,14 @@ class classification_io(io_adapter):
                 det_label = labels_map[id] if labels_map else '#{}'.format(id)
                 log.info('{:.7f} {}'.format(probs[id], det_label))
 
-
+class colorization_v2_io(io_adapter):
+    def __init__(self, args, io_model_wrapper, transformer):
+        super().__init__(args, io_model_wrapper, transformer)
+    
+    def process_output(self, result, log):
+        pass
+        
+    
 class detection_io(io_adapter):
     def __init__(self, args, io_model_wrapper, transformer):
         super().__init__(args, io_model_wrapper, transformer)
@@ -241,6 +252,9 @@ class detection_io(io_adapter):
             orig_h, orig_w = shapes[i % ib]
             image = input[i % ib].transpose((1, 2, 0))
             images.append(cv2.resize(image, (orig_w, orig_h)))
+            cv2.resize(image, (orig_w, orig_h))
+            cv2.imshow("image", image)
+            cv2.waitKey()  
         for batch in range(b):
             for out_num in range(ib):
                 isbreak = False
@@ -274,6 +288,220 @@ class detection_io(io_adapter):
             cv2.imwrite(out_img, image)
             log.info('Result image was saved to {}'.format(out_img))
             count += 1
+
+class detection_v2_io(io_adapter):
+    def __init__(self, args, io_model_wrapper, transformer):
+        super().__init__(args, io_model_wrapper, transformer)
+
+    def process_output(self, result, log):
+        if (self._not_valid_result(result)):
+            log.warning('Model output is processed only for the number iteration = 1')
+            return
+        result_508 = result['508'][0]
+        result_511 = result['511'][0]
+        result_514 = result['514'][0]
+        input_layer_name = next(iter(self._input))
+        shapes = result_508.shape
+        orig_shapes = self._original_shapes[input_layer_name][0] #iter
+        #f = open('text.md', 'w')
+        center_classes = {}
+        image = self._input[input_layer_name][0].transpose((1, 2, 0))#iter
+        for class_id in range(shapes[0]):
+            for i in range(shapes[1]):
+                for j in range(shapes[2]):
+                    v = result_508[class_id][i][j] 
+                    if v > 0:
+                        try:
+                            center_classes[class_id] = result_508[class_id][i+1][j+1]
+                        except IndexError:
+                            center_classes[class_id] = result_508[class_id][i][j]
+                        #correct_width, correct_height = result_514[0][i+1][j+1], result_514[1][i+1][j+1]
+                        im = cv2.resize(image,(image.shape[0],image.shape[1]))
+                        W, H = result_511[0][i+1][j+1] * orig_shapes[0] / 2, result_511[1][i+1][j+1] * orig_shapes[1] / 2
+                        #realwidth, realheight = H / 2 + correct_height,  W / 2 + correct_width
+                        # xmin = int((4*(i+1) - realwidth)*orig_shapes[1]/shapes[0])
+                        # xmax = int((i+1 + realwidth)*orig_shapes[1]/shapes[0])
+                        # ymin = int((j+1 - realheight)*orig_shapes[0]/shapes[1])
+                        # ymax = int((j+1 + realheight)*orig_shapes[0]/shapes[1])
+                        im = cv2.Mat(image)
+                        #cv2.rectangle(im, (xmin, ymin), (xmax, ymax), (255, 0, 0), 2)
+                        # float_arr = np.matrix(result_514[0])
+                        # uint_img = np.array(float_arr+155).astype('uint8')
+                        # grayImage = cv2.cvtColor(uint_img, cv2.COLOR_GRAY2BGR)
+                        # cv2.imwrite('Grayimage.jpg',grayImage)
+                        # float_arr1 = np.matrix(result_514[1])
+                        # uint_img1 = np.array(float_arr1+155).astype('uint8')
+                        # grayImage1 = cv2.cvtColor(uint_img1, cv2.COLOR_GRAY2BGR)
+                        # cv2.imwrite('Grayimage1.jpg',grayImage1)
+                        # f.write(str(result_511[0][i][j-1]) + ' ')
+                        # f.write(str(result_511[0][i][j]) + '\n')
+                        # f.write(str(result_511[0][i-1][j-1]) + ' ')
+                        # f.write(str(result_511[0][i-1][j]) + '\n\n')
+                        # f.write(str(result_511[1][i][j-1]) + ' ')
+                        # f.write(str(result_511[1][i][j]) + '\n')
+                        # f.write(str(result_511[1][i-1][j-1]) + ' ')
+                        # f.write(str(result_511[1][i-1][j]) + '\n\n')
+           
+                        #TODO
+                        #make the center pixel is v[class_id][i+1][j+1]
+                        #break out of 2 cycles
+        #f.close()
+        out_img = os.path.join(os.path.dirname(__file__), 'out_detection_{}.bmp'.format(1))
+        cv2.imwrite(out_img, im)
+        log.info('Result image was saved to {}'.format(out_img))
+
+        #             matrix = np.matrix(result_508[class_id])
+        #     for line in matrix:
+        #         f.write(str(list(line)) + '\n')
+        #human  = result_508[0][0]
+        # input_layer_name = next(iter(self._input))
+        # result_layer_name = next(iter(result))
+        # input = self._input[input_layer_name]
+        # result = result[result_layer_name]
+        # shapes = self._original_shapes[input_layer_name]
+        # ib = input.shape[0]
+        # b = result.shape[0]
+        # N = result.shape[2] // ib
+        # images = []
+        # ans = []
+        # for i in range(b * ib):
+        #     orig_h, orig_w = shapes[i % ib]
+        #     image = input[i % ib].transpose((1, 2, 0))
+        #     flag = 0
+        #     for x in range(len(image[0])):
+        #         for y in range(len(image[1])):
+        #             t = len(result_508[0])
+        #             #ans.append[]
+        #             for z in range(len(result_508[0])):
+        #                 if result_508[0][z][x//4][y//4] > 0:
+        #                     flag += 1
+        #                     #pixel = (image[x][y][0] + image[x][y][1] + image[x][y][2]) // 3
+        #                     #image[x][y] = (pixel, pixel, pixel)
+        #     # cv2.resize(image, (orig_w, orig_h))
+        #     # cv2.imshow("image", image)
+        #     # cv2.waitKey()             
+        #     images.append(cv2.resize(image, (orig_w, orig_h)))
+        # count = 0
+        # for image in images:
+        #     out_img = os.path.join(os.path.dirname(__file__), 'out_detection_{}.bmp'.format(count + 1))
+        #     cv2.imwrite(out_img, image)
+        #     log.info('Result image was saved to {}'.format(out_img))
+        #     count += 1
+        # if (self._not_valid_result(result)):
+        #     log.warning('Model output is processed only for the number iteration = 1')
+        #     return
+        # result_508 = result['508']
+        # human  = result_508[0][0]
+        # horse = result_508[0][17]
+        # input_layer_name = next(iter(self._input))
+        # input = self._input[input_layer_name]
+        # ib = input.shape[0]
+        # b = result.shape[0]
+        # N = result.shape[2] // ib
+        # images = []
+        # for i in range(b * ib):
+        #     orig_h, orig_w = shapes[i % ib]
+        #     image = input[i % ib].transpose((1, 2, 0))
+        #     images.append(cv2.resize(image, (orig_w, orig_h)))
+
+
+        
+        # shapes = self._original_shapes[input_layer_name]
+        # inputimg = self._input['input.1'][0].transpose((1, 2, 0))
+        # dim = (shapes[0][1], shapes[0][0])
+        # resized = cv2.resize(inputimg, dim, interpolation = cv2.INTER_AREA)
+        
+        # cv2.imwrite('color_img.jpg', resized)
+        # cv2.imshow("image", resized)
+        # cv2.waitKey()
+        
+        # imgcv = cv2.imread(human,cv2.IMREAD_GRAYSCALE)
+        # dim = (shapes[0][1], shapes[0][0])
+        # resized = cv2.resize(imgcv, dim, interpolation = cv2.INTER_AREA)
+        # cv2.imwrite('color_img.jpg', resized)
+        # cv2.imshow("image", resized)
+        # cv2.waitKey()
+        # input_layer_name = next(iter(self._input))
+        # shapes = self._original_shapes[input_layer_name]
+        # #img = np.zeros((shapes[0][0],shapes[0][1]))
+        # img = np.zeros((96,96,3))
+        # some = [[],[]]
+        # for i in range(96):
+        #     for j in range(96):
+        #         if human[i][j] > 0:
+        #             value = human[i][j]
+        #             if value > 1:
+        #                 value = 1
+        #             some[0].append(value)
+        #             img[i][j] = (value * 255, 0, 0)
+        #         if horse[i][j] > 0:
+        #             value = horse[i][j]
+        #             if value > 1:
+        #                 value = 1
+        #             some[1].append(value)
+        #             img[i][j] = (value * 255, 0, 0)
+        # dim = (shapes[0][1], shapes[0][0])
+        # #dim = (1920,1080)
+        # resized = cv2.resize(img, dim, interpolation = cv2.INTER_AREA)
+        # cv2.imwrite('color_img.jpg', resized)
+        # cv2.imshow("image", resized)
+        # cv2.waitKey()
+        # result_511 = result['511']
+        # result_514 = result['514']
+        # result_layer_name = next(iter(result))
+        # input_layer_name = next(iter(self._input))
+        
+        #for i in range
+        #print('aaaaaa')
+        # result_layer_name = next(iter(result))
+        # result_layer_name_511 = next(next(iter(result)))
+        # input = self._input[input_layer_name]
+        # result = result[result_layer_name]
+        # result511 = result[511]
+        # result514 = result['514']
+        # shapes = self._original_shapes[input_layer_name]
+        # ib = input.shape[0]
+        # b = result.shape[0]
+        # N = result.shape[2] // ib
+        # images = []
+        # for i in range(b * ib):
+        #     orig_h, orig_w = shapes[i % ib]
+        #     image = input[i % ib].transpose((1, 2, 0))
+        #     images.append(cv2.resize(image, (orig_w, orig_h)))
+        # for batch in range(b):
+        #     for out_num in range(ib):
+        #         isbreak = False
+        #         for obj in result[batch][0][out_num * N: (out_num + 1) * N]:
+        #             image_number = int(obj[0])
+        #             if image_number < 0:
+        #                 isbreak = True
+        #                 break
+        #             if obj[2] > self._threshold:
+        #                 image = images[image_number + batch * ib]
+        #                 initial_h, initial_w = image.shape[:2]
+        #                 xmin = int(obj[3] * initial_w)
+        #                 ymin = int(obj[4] * initial_h)
+        #                 xmax = int(obj[5] * initial_w)
+        #                 ymax = int(obj[6] * initial_h)
+        #                 class_id = int(obj[1])
+        #                 color = (
+        #                     min(int(class_id * 12.5), 255),
+        #                     min(class_id * 7, 255),
+        #                     min(class_id * 5, 255)
+        #                 )
+        #                 cv2.rectangle(image, (xmin, ymin), (xmax, ymax), color, 2)
+        #                 log.info('Bounding boxes for image {0} for object {1}'.format(image_number, class_id))
+        #                 log.info('Top left: ({0}, {1})'.format(xmin, ymin))
+        #                 log.info('Bottom right: ({0}, {1})'.format(xmax, ymax))
+        #         if isbreak:
+        #             break
+        # count = 0
+        # for image in images:
+        #     out_img = os.path.join(os.path.dirname(__file__), 'out_detection_{}.bmp'.format(count + 1))
+        #     cv2.imwrite(out_img, image)
+        #     log.info('Result image was saved to {}'.format(out_img))
+        #     count += 1
+
 
 
 class face_detection_io(io_adapter):
